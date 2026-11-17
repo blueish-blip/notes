@@ -566,6 +566,7 @@ def jalankan_analisis(folder=".", maks_per_nada=40, log=print):
     # ======================= BAGIAN 2: CHORD =======================
     inst_templ2 = pilih_gitar_template(meta_v)
     audio_templ2 = {c: pangkas_sunyi(rakit(meta_v, pemuat, inst_templ2[c], CHORD[c], 75, 0.025)) for c in NAMA_CHORD}
+    meta_t = pd.concat([meta_t, meta_v[~meta_v.instrument_str.isin(set(inst_templ2.values()))]])
     rng2 = np.random.default_rng(2026)
     data2, salah2 = [], []
     for inst in sorted(meta_t.instrument_str.unique()):
@@ -710,14 +711,29 @@ def tuner_live(x, A, senar_manual=None):
             "status": status_cent(c), "jalur": jalur, "yin_lebar": yin_f0(x)}
 
 
+PASANGAN = {"A": "Am", "Am": "A", "E": "Em", "Em": "E", "D": "Dm", "Dm": "D"}
+
 def cek_chord_live(x, target, A, b_kurang=0.3, b_lebih=0.5):
     x = bersihkan(pangkas_sunyi(np.asarray(x, float)))
     Fc = fitur_chroma(x)
     jarak = np.array([dtw_norm(T, Fc) for T in A["F_templ2"]["chroma"]])
-    terdekat = NAMA_CHORD[int(np.argmin(jarak))]
-    v = profil_bersih(x); nada = pc(CHORD[target])
+    urut = np.argsort(jarak)
+    terdekat, kedua = NAMA_CHORD[urut[0]], NAMA_CHORD[urut[1]]
+    v = profil_bersih(x)
+
+    # pemecah mayor/minor: bandingkan terts minor (akar+3) dan terts mayor (akar+4)
+    dikoreksi = False
+    if PASANGAN.get(terdekat) == kedua:
+        minor = terdekat if terdekat.endswith("m") else kedua
+        mayor = PASANGAN[minor]
+        akar = CHORD[minor][0] % 12
+        pilihan = minor if v[(akar + 3) % 12] > v[(akar + 4) % 12] else mayor
+        dikoreksi = pilihan != terdekat
+        terdekat = pilihan
+
+    nada = pc(CHORD[target])
     kurang = [NAMA_NADA[k] for k in sorted(nada) if v[k] < b_kurang]
     lebih = [NAMA_NADA[k] for k in range(12) if k not in nada and v[k] > b_lebih]
     _, _, jalur = dtw(A["F_templ2"]["chroma"][NAMA_CHORD.index(target)], Fc)
     return {"x": x, "F": Fc, "jarak": jarak, "terdekat": terdekat, "benar": terdekat == target,
-            "profil": v, "kurang": kurang, "lebih": lebih, "jalur": jalur}
+            "profil": v, "kurang": kurang, "lebih": lebih, "jalur": jalur, "dikoreksi": dikoreksi}
