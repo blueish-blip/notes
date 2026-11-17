@@ -414,7 +414,8 @@ NSynth dengan jeda 10–100 ms antarsenar.
         st.markdown("""
 - **Halaman 2 & 3**: hasil evaluasi (akurasi, selang kepercayaan, matriks konfusi, uji statistik).
 - **Halaman 4**: tekan tombol mikrofon, petik satu senar ±2 detik, lalu hentikan. Hasil senar dan cent muncul otomatis.
-- **Halaman 5**: pilih chord tujuan, tekan mikrofon, strumming chord, lalu hentikan.
+- **Halaman 5**: mode *Otomatis* menebak chord yang kamu mainkan; mode *Manual* memeriksa chord tujuan yang dipilih.
+- Tombol **Rekam lagi** di halaman 4 dan 5 menghapus rekaman sebelumnya agar bisa merekam ulang.
 - Bila mikrofon tidak bisa dipakai, unggah file **WAV** sebagai gantinya.
 """)
 
@@ -583,24 +584,31 @@ benar jika chord paling mirip sama dengan chord tujuan.
 
 
 # =============================================================================== input audio
+def rekam_ulang(kunci):
+    """Naikkan penghitung agar widget rekaman/unggah dibuat baru (kosong) dan siap merekam lagi."""
+    st.session_state[f"{kunci}_n"] = st.session_state.get(f"{kunci}_n", 0) + 1
+
+
 def input_audio(kunci):
+    n = st.session_state.get(f"{kunci}_n", 0)
     sumber = None
     if hasattr(st, "audio_input"):
-        sumber = st.audio_input("Tekan mikrofon untuk merekam, tekan lagi untuk berhenti", key=f"{kunci}_rekam")
+        sumber = st.audio_input("Tekan mikrofon untuk merekam, tekan lagi untuk berhenti", key=f"{kunci}_rekam_{n}")
     else:
         st.warning("Versi Streamlit belum mendukung perekaman (perlu ≥ 1.40). Gunakan unggah file.")
     with st.expander("atau unggah file WAV"):
-        unggah = st.file_uploader("File WAV", type=["wav"], key=f"{kunci}_unggah")
+        unggah = st.file_uploader("File WAV", type=["wav"], key=f"{kunci}_unggah_{n}")
     sumber = sumber or unggah
     if sumber is None:
         return None
+    st.button("Rekam lagi", icon=":material/restart_alt:", key=f"{kunci}_ulang", on_click=rekam_ulang, args=(kunci,))
     try:
         x = tc.muat(sumber.getvalue())
     except Exception as e:
         st.error(f"File tidak bisa dibaca sebagai WAV ({e}). Ubah dulu ke WAV, misalnya dengan ffmpeg.")
         return None
     if len(x) < 0.4 * tc.SR:
-        st.warning("Rekaman terlalu pendek. Biarkan bunyi berlangsung ±2 detik.")
+        st.warning("Rekaman terlalu pendek. Biarkan bunyi berlangsung ±2 detik, lalu tekan **Rekam lagi**.")
         return None
     return x
 
@@ -662,20 +670,35 @@ diukur dengan menjumlahkan energi di harmoniknya (±1 semitone dari senar), lalu
 
 # =============================================================================== 5. cek chord live
 if halaman.startswith("5"):
-    judul("Coba cek chord", "Pilih chord, strumming sekali, lalu lihat apakah sudah benar")
+    judul("Coba cek chord", "Strumming sekali, lalu lihat chord yang terdeteksi atau apakah chord pilihanmu sudah benar")
     c1, c2 = st.columns([1, 2])
     with c1:
-        target = st.selectbox("Chord yang ingin dimainkan", tc.NAMA_CHORD, index=tc.NAMA_CHORD.index("G"))
-        st.markdown(svg_img(svg_chord(target), 170, f"Diagram chord {target}"), unsafe_allow_html=True)
-        st.markdown(f"**Posisi jari** (senar 6 → 1): `{tc.POSISI_JARI[target]}`")
-        st.markdown("**Nada**: " + ", ".join(tc.nama_nada(p) for p in tc.CHORD[target]))
-        st.markdown("**Kelas nada**: " + ", ".join(tc.NAMA_NADA[k] for k in sorted(tc.pc(tc.CHORD[target]))))
+        mode_c = st.radio("Mode", ["Otomatis (DTW menebak chord)", "Manual (pilih chord tujuan)"], key="mode_chord")
+        auto = mode_c.startswith("Otomatis")
+        target = None
+        if not auto:
+            target = st.selectbox("Chord yang ingin dimainkan", tc.NAMA_CHORD, index=tc.NAMA_CHORD.index("G"))
+            st.markdown(svg_img(svg_chord(target), 170, f"Diagram chord {target}"), unsafe_allow_html=True)
+            st.markdown(f"**Posisi jari** (senar 6 → 1): `{tc.POSISI_JARI[target]}`")
+            st.markdown("**Nada**: " + ", ".join(tc.nama_nada(p) for p in tc.CHORD[target]))
+            st.markdown("**Kelas nada**: " + ", ".join(tc.NAMA_NADA[k] for k in sorted(tc.pc(tc.CHORD[target]))))
         with st.expander("Pengaturan diagnosis"):
             b_kurang = st.slider("Ambang 'nada kurang'", 0.1, 0.6, 0.3, 0.05)
             b_lebih = st.slider("Ambang 'nada berlebih'", 0.3, 0.9, 0.5, 0.05)
     with c2:
-        st.markdown("""
+        if auto:
+            st.markdown("""
+**Cara pakai:** tekan mikrofon, bunyikan chord sekali (tidak perlu memilih chord lebih dulu), biarkan berbunyi ±2 detik, lalu hentikan.
+Untuk mencoba lagi, tekan **Rekam lagi**.
+
+**Cara kerja:** DTW (fitur chroma) mencocokkan strumming dengan 8 template chord dan menampilkan chord yang paling mirip.
+Petunjuk *nada kurang/berlebih* membandingkan profil 12 nada rekaman dengan nada chord yang terdeteksi; ini heuristik,
+jadi gunakan sebagai petunjuk, bukan vonis. Untuk memeriksa chord tertentu, pakai mode **Manual**.
+""")
+        else:
+            st.markdown("""
 **Cara pakai:** pilih chord, tekan mikrofon, bunyikan chord sekali, biarkan berbunyi ±2 detik, lalu hentikan.
+Untuk mencoba lagi, tekan **Rekam lagi**.
 
 **Cara kerja:** DTW (fitur chroma) mencocokkan strumming dengan 8 template chord. Dinyatakan **BENAR** bila chord paling mirip
 sama dengan chord tujuan. Petunjuk *nada kurang/berlebih* membandingkan profil 12 nada rekaman dengan nada chord; ini heuristik,
@@ -683,17 +706,29 @@ jadi gunakan sebagai petunjuk, bukan vonis.
 """)
     x = input_audio("chord")
     if x is not None:
-        r = tc.cek_chord_live(x, target, A, b_kurang, b_lebih)
-        jenis = "ok" if r["benar"] else "bad"
-        st.session_state["terakhir"] = {"besar": r["terdekat"], "kecil": f"target {target}", "detail": "cek chord",
-                                        "pill": pill("BENAR" if r["benar"] else "SALAH", jenis)}
+        if auto:
+            # tebak dulu chord terdekat, lalu diagnosis dihitung terhadap chord yang terdeteksi itu
+            r = tc.cek_chord_live(x, tc.NAMA_CHORD[0], A, b_kurang, b_lebih)
+            if r["terdekat"] != tc.NAMA_CHORD[0]:
+                r = tc.cek_chord_live(x, r["terdekat"], A, b_kurang, b_lebih)
+            target = r["terdekat"]
+            jenis, label_pill = "ok", "TERDETEKSI"
+        else:
+            r = tc.cek_chord_live(x, target, A, b_kurang, b_lebih)
+            jenis = "ok" if r["benar"] else "bad"
+            label_pill = "BENAR" if r["benar"] else "SALAH"
+        st.session_state["terakhir"] = {"besar": r["terdekat"], "kecil": "otomatis" if auto else f"target {target}",
+                                        "detail": "cek chord", "pill": pill(label_pill, jenis)}
         c1, c2, c3 = st.columns([1, 1.3, 1.3])
         with c1:
             with st.container(border=True):
-                st.markdown(f'<div class="gl-res"><span class="m">Target: {target} · paling mirip</span>'
-                            f'<span class="gl-big">{r["terdekat"]}</span>{pill("BENAR" if r["benar"] else "SALAH", jenis)}</div>',
+                st.markdown(f'<div class="gl-res"><span class="m">{"Chord terdeteksi" if auto else f"Target: {target} · paling mirip"}</span>'
+                            f'<span class="gl-big">{r["terdekat"]}</span>{pill(label_pill, jenis)}</div>',
                             unsafe_allow_html=True)
-                if not r["benar"]:
+                if auto:
+                    st.markdown(svg_img(svg_chord(target), 150, f"Diagram chord {target}"), unsafe_allow_html=True)
+                    st.caption(f"Posisi jari (senar 6 → 1): {tc.POSISI_JARI[target]}")
+                elif not r["benar"]:
                     st.error(f"Bunyi lebih mirip chord {r['terdekat']}")
                 if r["kurang"]:
                     st.warning("Cek nada kurang: " + ", ".join(r["kurang"]))
