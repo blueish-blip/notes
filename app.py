@@ -128,7 +128,10 @@ def fig_ci(tab):
     t = tab.sort_values("akurasi")
     fig, ax = plt.subplots(figsize=(8, 0.38 * len(t) + 1))
     warna = [BIRU if "DTW" in m else JINGGA if ("YIN" in m or "biner" in m) else ABU for m in t.index]
-    ax.errorbar(t.akurasi, range(len(t)), xerr=[t.akurasi - t["CI 95% bawah"], t["CI 95% atas"] - t.akurasi],
+    # CI Wilson bisa sedikit "meleset" dari akurasi karena pembulatan (mis. akurasi 100%), jadi panjang garis dibatasi >= 0
+    err_bawah = np.clip((t.akurasi - t["CI 95% bawah"]).to_numpy(float), 0, None)
+    err_atas = np.clip((t["CI 95% atas"] - t.akurasi).to_numpy(float), 0, None)
+    ax.errorbar(t.akurasi, range(len(t)), xerr=[np.nan_to_num(err_bawah), np.nan_to_num(err_atas)],
                 fmt="none", ecolor="gray", capsize=3)
     ax.scatter(t.akurasi, range(len(t)), c=warna, zorder=3, s=40)
     ax.set_yticks(range(len(t))); ax.set_yticklabels(t.index); ax.set_xlim(0, 1.02)
